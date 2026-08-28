@@ -1,0 +1,426 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   LSD design tokens. Dark-only by design: the palette is Sherwood at night -
+   a deep forest ground with gold as the primary accent (the coin, the
+   exchequer) and leaf green as the secondary (the wood). Warm parchment text
+   keeps it legible without breaking the scene.
+   --------------------------------------------------------------------------- */
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  --color-ink: #08100a;
+  --color-ink-soft: #0d1810;
+  --color-haze: #91a08b;
+  --color-chalk: #ede8d6;
+
+  --color-gold: #e3b341;
+  --color-leaf: #57b06c;
+  --color-lime: #a9d05f;
+  --color-ember: #d98e39;
+}
+
+:root {
+  --edge: rgba(237, 232, 214, 0.10);
+  --edge-strong: rgba(237, 232, 214, 0.18);
+  --glass: rgba(237, 232, 214, 0.035);
+  --gilt: linear-gradient(115deg, #f6e08a 0%, #e3b341 48%, #57b06c 100%);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-ink);
+  color: var(--color-chalk);
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Three slow-drifting colour fields + a fine grid. Purely decorative, sits
+   behind everything and never intercepts pointer events: torchlight, canopy,
+   and a low gold haze. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -25%;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(38rem 38rem at 18% 12%, rgba(227, 179, 65, 0.16), transparent 62%),
+    radial-gradient(42rem 42rem at 82% 28%, rgba(34, 110, 60, 0.26), transparent 64%),
+    radial-gradient(36rem 36rem at 50% 92%, rgba(87, 176, 108, 0.14), transparent 62%);
+  filter: blur(28px);
+  animation: drift 34s ease-in-out infinite alternate;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(237, 232, 214, 0.026) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(237, 232, 214, 0.026) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 20%, transparent 78%);
+}
+
+@keyframes drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(2.5%, -3%, 0) scale(1.06);
+  }
+  100% {
+    transform: translate3d(-2%, 2.5%, 0) scale(1.02);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before {
+    animation: none;
+  }
+}
+
+/* --- text ---------------------------------------------------------------- */
+
+.gilt-text {
+  background: var(--gilt);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.eyebrow {
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-haze);
+}
+
+/* --- surfaces ------------------------------------------------------------ */
+
+.panel {
+  position: relative;
+  border-radius: 1rem;
+  border: 1px solid var(--edge);
+  background: var(--glass);
+  backdrop-filter: blur(14px);
+  box-shadow:
+    inset 0 1px 0 rgba(246, 224, 138, 0.05),
+    0 18px 40px -28px rgba(0, 0, 0, 0.9);
+}
+
+/* Card that reveals a gilt edge on hover - used for the nav tiles. */
+.tile {
+  position: relative;
+  border-radius: 1rem;
+  border: 1px solid var(--edge);
+  background: var(--glass);
+  backdrop-filter: blur(14px);
+  overflow: hidden;
+  transition: transform 220ms ease, border-color 220ms ease;
+}
+
+.tile::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--gilt);
+  opacity: 0;
+  transition: opacity 220ms ease;
+  mask-image: linear-gradient(to bottom, #000, transparent 55%);
+  pointer-events: none;
+}
+
+.tile:hover {
+  transform: translateY(-3px);
+  border-color: var(--edge-strong);
+}
+
+.tile:hover::before {
+  opacity: 0.09;
+}
+
+/* --- controls ------------------------------------------------------------ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.625rem;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  white-space: nowrap;
+  transition: filter 160ms ease, background-color 160ms ease, border-color 160ms ease;
+}
+
+.btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.btn-gilt {
+  background: var(--gilt);
+  color: #17130a;
+  font-weight: 600;
+}
+
+.btn-gilt:not(:disabled):hover {
+  filter: brightness(1.12) saturate(1.1);
+}
+
+.btn-ghost {
+  border: 1px solid var(--edge);
+  background: rgba(237, 232, 214, 0.02);
+  color: var(--color-chalk);
+}
+
+.btn-ghost:not(:disabled):hover {
+  border-color: var(--edge-strong);
+  background: rgba(237, 232, 214, 0.06);
+}
+
+.field {
+  width: 100%;
+  border-radius: 0.625rem;
+  border: 1px solid var(--edge);
+  background: rgba(0, 0, 0, 0.35);
+  padding: 0.5rem 0.75rem;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.875rem;
+  color: var(--color-chalk);
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.field::placeholder {
+  color: rgba(145, 160, 139, 0.7);
+}
+
+.field:focus {
+  border-color: rgba(227, 179, 65, 0.6);
+  box-shadow: 0 0 0 3px rgba(227, 179, 65, 0.14);
+}
+
+/* --- misc ---------------------------------------------------------------- */
+
+.pulse-dot {
+  position: relative;
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: var(--color-lime);
+}
+
+.pulse-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: var(--color-lime);
+  animation: halo 1.9s ease-out infinite;
+}
+
+@keyframes halo {
+  0% {
+    transform: scale(1);
+    opacity: 0.65;
+  }
+  100% {
+    transform: scale(2.9);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-dot::after {
+    animation: none;
+  }
+}
+
+/* --- brand mark ---------------------------------------------------------- */
+
+.coin-float {
+  filter: drop-shadow(0 0 42px rgba(227, 179, 65, 0.4)) drop-shadow(0 18px 30px rgba(0, 0, 0, 0.55));
+  animation: float 7s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(-6px) rotate(-1.5deg);
+  }
+  50% {
+    transform: translateY(6px) rotate(1.5deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coin-float {
+    animation: none;
+  }
+}
+
+/* --- floor gauge --------------------------------------------------------- */
+
+/* The filled "floor" bar. A slow upward shimmer reads as the floor rising,
+   which is what bonds and swept fees do to it every epoch. */
+.floor-fill {
+  background: var(--gilt);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 245, 214, 0.30),
+    0 0 30px -4px rgba(227, 179, 65, 0.6);
+  border-right: 2px solid rgba(255, 248, 224, 0.85);
+  transition: width 900ms cubic-bezier(0.22, 1, 0.36, 1);
+  overflow: hidden;
+  opacity: 0.92;
+}
+
+.floor-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(0deg, transparent, rgba(255, 248, 224, 0.10) 50%, transparent);
+  transform: translateY(100%);
+  animation: floor-rise 3.4s ease-in-out infinite;
+}
+
+@keyframes floor-rise {
+  0% { transform: translateY(100%); opacity: 0; }
+  40% { opacity: 1; }
+  100% { transform: translateY(-100%); opacity: 0; }
+}
+
+.market-marker {
+  transition: left 900ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floor-fill,
+  .market-marker { transition: none; }
+  .floor-fill::after { animation: none; }
+}
+
+/* --- activity feed ------------------------------------------------------- */
+
+.feed-row {
+  animation: feed-in 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes feed-in {
+  from { opacity: 0; transform: translateY(-6px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .feed-row { animation: none; }
+}
+
+/* --- sherwood mode (easter egg) ------------------------------------------ */
+
+/* The wood at high noon: the same forest, lit up. Accents brighten to
+   fresh Lincoln green and polished gold; only CSS variables change, so
+   every gilt gradient, button and accent follows automatically. */
+:root[data-sherwood="on"] {
+  --color-gold: #f4c842;
+  --color-leaf: #43d16d;
+  --color-lime: #c3e857;
+  --color-ember: #f0a83a;
+  --gilt: linear-gradient(115deg, #ffe98f 0%, #f4c842 45%, #43d16d 100%);
+}
+
+:root[data-sherwood="on"] body::before {
+  background:
+    radial-gradient(38rem 38rem at 18% 12%, rgba(244, 200, 66, 0.24), transparent 62%),
+    radial-gradient(42rem 42rem at 82% 28%, rgba(46, 160, 82, 0.30), transparent 64%),
+    radial-gradient(36rem 36rem at 50% 92%, rgba(67, 209, 109, 0.18), transparent 62%);
+}
+
+.sherwood-arrow {
+  position: absolute;
+  left: -6vw;
+  font-size: 1.6rem;
+  color: #facc15;
+  text-shadow: 0 0 12px rgba(250, 204, 21, 0.7);
+  animation-name: arrow-fly;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.9, 0.3);
+  animation-fill-mode: forwards;
+}
+
+@keyframes arrow-fly {
+  from { transform: translateX(0) rotate(0deg); opacity: 0; }
+  10% { opacity: 1; }
+  to { transform: translateX(114vw) rotate(6deg); opacity: 0.9; }
+}
+
+/* --- docs page ----------------------------------------------------------- */
+
+/* Section marker: a bow-drawn arrow that echoes the Sherwood easter egg. */
+.doc-mark {
+  color: var(--color-lime);
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.doc-h2 {
+  font-size: 1.5rem;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+
+.doc-prose p { color: var(--color-haze); line-height: 1.7; }
+.doc-prose p + p { margin-top: 0.75rem; }
+.doc-prose strong { color: var(--color-chalk); font-weight: 600; }
+.doc-prose code {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.85em;
+  color: var(--color-chalk);
+  background: rgba(237, 232, 214, 0.05);
+  border: 1px solid var(--edge);
+  border-radius: 0.35rem;
+  padding: 0.05rem 0.35rem;
+}
+
+.doc-formula {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.85rem;
+  color: var(--color-chalk);
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--edge);
+  border-left: 2px solid var(--color-gold);
+  border-radius: 0.5rem;
+  padding: 0.85rem 1rem;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.doc-toc-link {
+  display: block;
+  width: 100%;
+  padding: 0.32rem 0.6rem;
+  border-left: 2px solid transparent;
+  color: var(--color-haze);
+  font-size: 0.82rem;
+  transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease;
+}
+.doc-toc-link:hover { color: var(--color-chalk); border-left-color: var(--color-gold); }
+.doc-toc-link.is-active {
+  color: var(--color-chalk);
+  border-left-color: var(--color-gold);
+  background: rgba(237, 232, 214, 0.04);
+  font-weight: 500;
+}
+
+.doc-page { animation: doc-fade 200ms ease-out; }
+@keyframes doc-fade { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .doc-page { animation: none; } }

@@ -1,0 +1,462 @@
+Liquid Supply Dollar (LSD)
+Copyright 2026
+
+This product includes software originally developed by Empty Set Squad
+<emptysetsquad@protonmail.com> as part of the Empty Set Dollar (ESD)
+protocol (https://github.com/emptysetsquad/dollar), licensed under the
+Apache License, Version 2.0. See LICENSE for the full license text.
+
+The contracts here are forked from ESD's original genesis implementation
+(commit 62fe40e, "Initial Commit") - the functioning bonding/rebase/
+coupon/governance mechanism - rather than the repository's current default
+branch, which by 2026 reflects ESD's final "EIP-25: Enable Migration"
+state (a one-time, hardcoded wind-down contract ESD used to migrate its
+V1 DAO off-chain into a V2 system, not a deployable protocol).
+
+Modifications made to the original source, as required by Apache License
+2.0 Section 4(b):
+  - Renamed the protocol and token from "Empty Set Dollar" / "ESD" to
+    "Liquid Supply Dollar" / "LSD" (after £sd - librae, solidi,
+    denarii, the historical English money of account), and the
+    bonded/stake token from "Empty Set Dollar Stake" / "ESDS" to
+    "Liquid Supply Dollar Stake" / "LSDS", throughout contracts, tests,
+    and configuration.
+  - Renamed package identifiers and deployment environment variables
+    accordingly.
+  - Constants.sol: CHAIN_ID set to Robinhood Chain Mainnet (4663).
+  - Constants.sol: retimed around 6-hour epochs (EPOCH_PERIOD 21600, four a
+    day) instead of ESD's daily ones. Several constants there count in
+    epochs rather than in time, so they were rescaled together to preserve
+    ESD's wall-clock windows: COUPON_EXPIRATION 90 -> 360 (still 90 days),
+    GOVERNANCE_PERIOD 7 -> 28 (still 7 days), and the exit lockup from
+    upstream's hardcoded single 24-hour epoch to DAO_EXIT_LOCKUP_EPOCHS = 16
+    (4 days at six-hour epochs). The pool's is shorter,
+    POOL_EXIT_LOCKUP_EPOCHS = 12 (3 days): providing liquidity already
+    carries impermanent loss that DAO bonding does not, and the oracle reads
+    its price from a pool, so that is the last place to add friction.
+    Upstream hardcoded both to one epoch; they are constants now.
+    BOOTSTRAPPING_PERIOD counts forced +10%
+    expansions rather than time, so the phase multiplies supply by
+    1.1^BOOTSTRAPPING_PERIOD. It is 45 here (~73x over 3.75 days at 2h
+    bootstrap epochs) against ESD's 90 (~5,300x): genesis bond capital is
+    divided by whatever multiplication follows it, and this fork wants the
+    genesis floor to survive its own genesis.
+  - Constants.sol: ORACLE_POOL_RATIO raised from 5 to 25, so a quarter of
+    each expansion goes to liquidity providers rather than a twentieth.
+    ESD's 5% left the pool thin; DSD, forking ESD after watching it run,
+    went to 35%. The oracle only reports a usable price while the pool has
+    liquidity, so what LPs are paid is not a side reward - it is what keeps
+    the price feed alive. Side effect worth knowing: the bonded share of
+    total supply now converges to 75% during sustained expansion rather
+    than 95%, since the pool's cut compounds outside the DAO. The deploy
+    script reads the epoch length back off the chain and refuses to finish
+    if it does not match what the operator expected, since switching only
+    some of these values is the failure mode.
+  - Added Robinhood Chain network configuration to the build and
+    deploy tooling.
+
+Price oracle and LP-incentive pool: moved from Uniswap V2 to Uniswap V4
+--------------------------------------------------------------------
+Upstream ESD's `Oracle.sol` and `Pool.sol` hardcode Ethereum mainnet's
+Uniswap V2 factory address and read/provide liquidity through a V2 pair.
+On Robinhood Chain, Uniswap v2/v3/v4 and the UniversalRouter are
+officially deployed, so the deploy uses the official PoolManager rather
+than bringing one. Note that the UniversalRouter there is a fork whose v4
+swap struct carries an extra `minHopPriceX36` field, so stock Uniswap SDK
+calldata reverts against it; the frontend encodes the struct by hand to
+match. Given that, this fork targets
+Uniswap V4 rather than re-deploying V2, and - importantly - keeps the
+price-reading pool and the LP-incentivized liquidity in the exact same V4
+pool. An earlier draft of this fork considered reading price from a
+separate, dedicated V4 pool while keeping LP incentives on a V2 pair; that
+would have made the price trivially manipulable (a thinly-traded pricing
+pool, unconnected to where the real liquidity/trading actually happens),
+so it was rejected in favor of the single-pool design below.
+
+  - `protocol/v4/src/Watchtower.sol` (new file, Solidity ^0.8.24, not a
+    modification of any upstream file): a Uniswap V4 hook that manually
+    accumulates a TWAP price (afterInitialize/afterSwap), exposing a
+    `capture()` with the same shape as upstream `Oracle.capture()`
+    (price, valid). "Valid" is approximated using the pool's current
+    in-range liquidity rather than upstream's x*y=k reserve check, since
+    V4 concentrated liquidity has no single "reserve" the way V2 does -
+    not a 1:1 semantic port, only an analogous safety check with the same
+    intent.
+  - `protocol/v4/src/Quiver.sol` (new file, Solidity ^0.8.24, replaces
+    `Pool.sol`/`Liquidity.sol`/`PoolState.sol`/`PoolGetters.sol`/
+    `PoolSetters.sol`, all removed): V4 has no fungible LP-token analogous
+    to a V2 pair's ERC20 share token, so this contract itself becomes the
+    pool's sole liquidity position (one fixed tick range) and tracks each
+    user's proportional share internally as "liquidity units" in place of
+    upstream's `univ2` ERC20 balance. The staged/bonded/phantom/claimable
+    bonding and reward-distribution accounting (including the
+    Frozen/Fluid anti-manipulation window on bond()/unbond()) is otherwise
+    byte-for-byte the same logic as upstream `Pool.sol` - it never
+    actually depended on `univ2` being an ERC20, just a fungible unit.
+  - `protocol/contracts/oracle/Longbow.sol`: rewritten to call
+    `Watchtower.capture()` through a local, 0.5.x-declared minimal
+    interface (`IV4OracleHook`) instead of reading a V2 pair directly.
+    Solidity can call any already-deployed contract through an
+    ABI-compatible interface regardless of which compiler version
+    produced it (this is exactly how upstream's Oracle.sol already called
+    the externally-deployed Uniswap V2 Factory/Pair) - it just cannot
+    `new` a contract across a pragma-major-version boundary, which is why
+    the hook and pool live in `protocol/v4/` as separate ^0.8.24
+    artifacts deployed by the deploy script rather than by Bowyer/Stringer
+    themselves.
+  - `protocol/contracts/oracle/IOracle.sol`: `setup()` removed (pool
+    initialization now happens once, directly, as part of the deploy
+    script rather than being triggered by the DAO);
+    `pair()` renamed to `hook()`.
+  - `protocol/contracts/dao/Deployer.sol`: `Bowyer`/`Stringer` no
+    longer construct Oracle/Pool's AMM dependencies themselves. Both now
+    read a compile-time placeholder address (`HOOK_ADDRESS`,
+    `POOL_ADDRESS`, both `address(0)` until filled in by the deploy
+    script - same pattern as the removed `UNISWAP_FACTORY`/`USDC`
+    placeholders) for the already-deployed `Watchtower`/`Quiver`.
+    `Bowyer.initialize()` also calls the hook's one-time `setDao()` to
+    hand control from the deployer (temporary "controller" since
+    deployment) to the newly-created Oracle - this breaks the circular
+    dependency between the hook (needs Oracle's address) and Oracle
+    (needs the hook's address), since both are unknown until the other
+    exists; see `Watchtower.sol`'s `controller`/`setDao()` docs.
+  - Test scaffolding updated to match the `IOracle` interface change
+    (no `setup()`, `hook()` instead of `pair()`).
+  - Removed as no longer reachable from the deploy path: `Pool.sol`,
+    `Liquidity.sol`, `PoolState.sol`, `PoolGetters.sol`, `PoolSetters.sol`,
+    `MockPool.sol`, `MockPoolState.sol`, `MockOracle.sol`,
+    `MockUniswapV2PairTrade.sol`, `MockUniswapV2PairLiquidity.sol`,
+    `external/UniswapV2Library.sol`, `external/UniswapV2OracleLibrary.sol`,
+    and their corresponding `test/oracle/Pool.test.js`,
+    `test/oracle/PoolState.test.js`, `test/oracle/Oracle.test.js` (their
+    coverage is superseded by `protocol/v4/test/*.t.sol`, which test
+    against a real, locally-simulated V4 PoolManager rather than mocks).
+  - `@uniswap/v2-core`/`@uniswap/lib` dependencies removed (no longer
+    used by the 0.5.x side).
+
+Addition: bond-backed treasury and a redemption floor
+------------------------------------------------------
+`protocol/contracts/dao/Treasury.sol` (new file, not a modification of any
+upstream ESD source), inherited by `Greenwood` alongside Bonding,
+Market, Regulator and Govern.
+
+Upstream ESD had one answer to a price below a dollar: coupons, which only
+pay out if the supply expands again. That makes them a bet on recovery
+rather than a floor, and when the recovery did not come there was nothing
+underneath. This adds two halves that only work together:
+
+  - `purchaseBond(asset, amount)` takes a listed reserve asset now and owes
+    LSD at a discount after BOND_VESTING_EPOCHS. The asset stays with the
+    protocol. That window is counted in epochs but aimed at wall-clock:
+    bootstrap epochs run at 1/BOOTSTRAPPING_SPEEDUP_FACTOR of the normal
+    length, so `Getters.bondVestingEpochs()` scales the count up during
+    bootstrapping and tapers it across the boundary, where part of the wait
+    is served by short epochs and the rest by full-length ones. A flat count
+    would hold the number and lose the duration - twelve epochs bought in the
+    last genesis epoch would run nearly three days rather than one. LSD is minted at claim rather than at
+    purchase, so nothing waits inside the contract and the supply the
+    oracle sees is not inflated by promises not yet due. Payouts route
+    through a new `Comptroller.mintToBondHolder`, which deliberately
+    creates no debt - the supply is backed rather than conjured, and
+    routing it through `mintToAccount` would have the protocol believe it
+    was in deficit and open coupon sales it has no business opening.
+  - `redeem(dollarAmount)` burns LSD and pays out that LSD's pro-rata share
+    of everything the protocol holds. This is what makes the backing real:
+    without it "backing" is a dashboard number; with it, LSD cannot trade
+    far below backing for long. It is unconditional on purpose - gating it
+    on a contraction would make it a promise rather than a mechanism.
+
+Redemption is exactly pro-rata and so cannot break itself: burning `d` of a
+supply `S` against a treasury `T` pays `T*d/S` and leaves `T/S` behind, so a
+rush shrinks both sides together and every remaining holder is left as
+backed as before. Integer division rounds the payout down, so the floor can
+only tick up.
+
+Bonds are credited on the balance delta the transfer actually produced, not
+on the amount the caller named - a token that skims a transfer fee, or
+rounds internally, cannot be owed LSD for value the treasury never
+received. The backing the price clamp compares against is read before that
+transfer, so a bonder's own deposit is not counted against them.
+
+Four guards, all covered by `protocol/v4/test/Treasury.t.sol` (25 tests
+against the real compiled 0.5.17 bytecode):
+  - A bond can never price below current backing: the effective price
+    clamps to backing rather than refusing (the same max(price, book) form
+    NetNet Capital quotes bonds with). A bond at backing grows treasury and
+    supply in proportion - integer rounding makes it weakly accretive - so
+    no price exists at which bonding lowers the floor, and no market
+    condition in which the discount closes the window.
+  - Issuance is capped per epoch at BOND_SUPPLY_LIMIT (10% of supply), so no
+    single actor can mint an unbounded amount of discounted supply. The cap
+    is deliberately generous: from a standing start a percent an epoch would
+    take months to build any backing worth having, and the guard that
+    actually protects holders is the one above.
+  - Bonds are closed whenever the oracle reported its pool too thin -
+    `Regulator.oracleCapture()` records the price bonds may sell against,
+    zero when there is none. During bootstrapping it records the pinned
+    flat GENESIS_BOND_PRICE (5.00), undiscounted, with no market input at
+    all - the oracle's validity check is only "the pool holds liquidity",
+    so at genesis dust listed at any price would read as a market, high to
+    shut the door or low to open it cheap. A price that reads nothing
+    cannot be fed anything. Five dollars for a token targeting one is paid
+    for the multiplication still ahead of early supply, which also quiets
+    the door by itself late in the bootstrap. During bootstrapping the
+    per-epoch capacity is GENESIS_BOND_SUPPLY_LIMIT's 20% rather than the
+    normal 10% - wider because at the flat genesis price every sale raises
+    backing and there is no manipulable market to defend against, and still
+    capped because an open door would let early capital corner the genesis
+    multiplication everyone later is diluted against. Expansion itself
+    still runs on the pinned 1.10.
+  - Bonding stops protocol-wide whenever any single reserve cannot be
+    priced. An unpriceable asset drops out of the treasury sum, which
+    understates backing, which makes the guard above easier to clear rather
+    than harder - so the sum failing has to close bonding, not relax it.
+
+Redemption also clamps `totalDebt` to the remaining supply. Deep in a
+contraction, debt raised against a larger supply can outlast it, and
+Comptroller asserts debt <= supply - without the clamp the floor would seize
+exactly when it is needed.
+
+What this does not do is make the floor rise by itself. Every expansion
+mints LSD against no new counter tokens and thins the backing, so bonds and
+swap fees have to bring in more than expansions dilute. And a bonder who
+sells the moment their bond vests is selling into the same market the price
+depends on; the discount buys their patience for the vesting window and no
+longer.
+
+A multi-asset reserve
+---------------------
+The treasury is not limited to the counter token. `Storage.State` carries an
+ordered list of reserve assets, each with the Chainlink feed that prices it,
+so governance can list tokenised stocks - Robinhood Chain publishes an
+AggregatorV3 feed per Stock Token - and bonds in those buy real equity into
+the backing. `Stringer` seeds the list with the counter token, which is the
+unit of account and needs no feed; everything else is valued against it.
+
+A listed reserve can also name the LSD pool it trades against, and the
+treasury then takes whichever of the two prices is LOWER. That direction is
+the whole of why a spot price is safe here without a TWAP: being paid more
+LSD for a bond requires a HIGHER valuation, and a minimum cannot be pushed
+up. Moving the pool against the protocol means moving it up, which the feed
+then wins; moving it down only makes the treasury value the asset more
+conservatively than the market does, which costs the bonder and never the
+holders. The pool can tighten the answer and never loosen it, so wiring one
+up is free.
+
+The cross-check is not a substitute for the feed. It applies only when
+there is a feed answer to compare against; a dead feed still closes
+bonding. The comparison side is a `Spyglass` (protocol/v4): a read-only,
+fully immutable adapter over the asset's own deep asset/USDG Uniswap V4
+pool, reporting the spot price of one whole asset in counter units. Beyond
+tightening the answer, it is the treasury's around-the-clock eye: the
+stock feeds follow the market's 24/5 hours while the pools trade on, so
+through a weekend the min() still has a live, conservative input. The min
+only applies inside a band: past RESERVE_MAX_DIVERGENCE (10%) apart, in
+either direction, one of the two sources is wrong and the treasury refuses
+to price the asset at all, which closes bonding and touches nothing else.
+
+Feeds are trusted in exactly one direction. Pricing decides how much LSD a
+bond pays out, and a bond the protocol cannot price is a bond it refuses to
+sell: a feed that is stale beyond the reserve staleness window, or answers
+zero or negative, closes bonding. That window starts at three days - wide
+enough to carry a 24/5 feed across a weekend, with the pool cross-check
+covering the gap conservatively -
+and is in storage rather than compiled in, because the true heartbeat is not
+published and the cost of guessing wrong is asymmetric. Too tight only closes
+bonding; too loose lets a bond be priced off a stale number, which dilutes
+every holder. Governance moves it either way, up to a ceiling, without an
+upgrade. Redemption reads no feed at all -
+it pays a straight pro-rata slice of every reserve balance, which needs no
+prices to be correct. A floor that only holds while an oracle is up is not a
+floor.
+
+The pro-rata argument above holds per asset, so it holds for the basket
+however the prices move. Delisting an asset stops new bonds in it but leaves
+the balance in the basket, because taking it out would hand it to nobody.
+
+Listing a reserve is the one action that could be used to drain the
+protocol - a worthless token paired with a lying feed bonds for real LSD -
+so it is governance-only, through the `ListReserve` proposal in
+`protocol/contracts/dao/Governance.sol`. There is no admin path to it.
+
+The bond discount moved from a compile-time constant into storage, bounded
+by MAX_BOND_DISCOUNT (25%) and movable only by a `treasurer` address that
+`Stringer` sets to the deploying account. That address holds exactly four
+powers - start the epoch clock once (`launch()`), stop new bonds instantly
+(`pauseBonds()`, which only governance can undo, through the `ResumeBonds`
+proposal or a fix's own initializer), move the discount, and point the gas
+oracle at a feed. It cannot move funds, mint, list a reserve, or make a
+bond that lowers backing, and governance can retire it by proposal. The discount decides how
+attractive bonds are and nothing more: whenever the discounted price would
+dip under backing it clamps there instead, so no discount setting can ever
+sell below the floor or close the window.
+
+Addition: a swap fee that feeds the backing
+-------------------------------------------
+`SwapFeeCollector` (new file) charges a per-hook fee on the unspecified
+side of every swap - the side the pool computes rather than the one the
+trader named, which is the only side a V4 `afterSwap` hook may adjust. This
+required the `afterSwapReturnDelta` permission and therefore a different
+mined hook address. Both exact-input and exact-output swaps are charged, so
+naming an output amount is not a way around it. The oracle pool charges 5
+basis points; the stock pools charge 100.
+
+`sweep(address[])` is permissionless and moves what accumulated: LSD is
+burned, everything else goes to the DAO. LSD is burned rather than forwarded
+because LSD forwarded to the DAO would be credited to no one - dead weight
+that raises no balance and backs nothing - whereas burning does the same
+job from the other side, since fewer LSD against the same reserves is more
+backing per LSD. A token that is a listed reserve is
+backing the moment it arrives; one that is not sits at the DAO until
+governance lists it, which is recoverable rather than lost. This is the only
+part of the backing that grows without anyone choosing to bond. The split
+is deliberate: the oracle pool's 5 bp stays small because a dollar-pegged
+token lives on arbitrage and that pool is where the arbitrage happens; the
+stock pools' 100 bp can be twenty times larger because they are not the
+peg's venue - there a toll is simply revenue, and all of it is backing.
+
+Change: the expansion limit ramps instead of standing at 10%
+------------------------------------------------------------
+Upstream ESD capped supply changes at SUPPLY_CHANGE_LIMIT = 10% per daily
+epoch. This fork's six-hour epochs quietly turned that into ~46% a day, and
+a single manipulated oracle epoch was enough to mint the full 10%. The
+limit is now a throttle that climbs by half again only in epochs where
+the price actually pins it, up to the unchanged 10% ceiling, and halves on
+every contraction epoch down to SUPPLY_RAMP_FLOOR (2.5% - about ESD's
+original daily rate at four epochs a day). It exits genesis AT the
+ceiling: bootstrapping is forty-five pinned expansions, so continuing
+demand is not asked to re-earn a rate it visibly holds; the unset state
+field simply reads as the ceiling. A deviation below the limit expands by
+the deviation and leaves the throttle alone. Debt growth in contraction
+epochs is capped by the same live limit. The live value is public as
+supplyLimit(); the state field is appended.
+
+To keep this and future changes inside EIP-170, several views were
+slimmed in the same stroke: backingPerDollar/bondDiscount/
+effectiveBondPrice return plain uint256 instead of ABIEncoderV2 structs,
+bondPrice/bondsThisEpoch/advanceIncentive went internal, the unused
+gasOracle getter was dropped, and the deploy compiles with optimizer
+runs=1 (deploy-size-optimal; runtime gas is a rounding error at this
+chain's prices).
+
+Change: the advance incentive is priced in gas, not in tokens
+---------------------------------------------------------------
+Upstream ESD paid whoever called advance() a flat 100 LSD forever. That is a
+bet that the token stays cheap: the incentive is denominated in LSD and the
+work it pays for is denominated in gas, so once LSD is worth something a flat
+amount is wildly overpaying for one transaction.
+
+`Greenwood.advance()` now measures the gas the call actually used,
+values it through a Chainlink ETH/USD feed and the last price the Regulator
+stood behind, and pays that plus ADVANCE_INCENTIVE_MARGIN percent - clamped
+between ADVANCE_INCENTIVE_MIN and ADVANCE_INCENTIVE_MAX. While bootstrapping
+it is flat at the maximum, because the supply is multiplying every epoch
+anyway and having the epochs stepped matters more than what it costs.
+
+The ceiling is load-bearing rather than cosmetic. The caller sets the gas
+price, so without one, paying an absurd gas price and being handed 125% of it
+back in LSD is a mint faucet that costs 80 cents on the dollar. The ceiling
+bounds that at the amount the protocol was already willing to pay.
+
+Every way of failing to price gas - no feed set, a stale feed, a
+non-positive answer - falls through to the floor rather than reverting. A
+protocol that cannot step its epoch because an oracle is down is worse than
+one that underpays for a while. For the same reason the feed is set by the
+treasurer rather than by vote: the window where it matters opens the moment
+bootstrapping ends, sooner than a governance cycle, and the worst a wrong
+feed can do is bounded by the ceiling.
+
+This is the one change that reorders upstream's expansion path: the incentive
+is minted after the three steps rather than before, because what to pay is
+not known until the work is done. The caller's own incentive is therefore not
+part of the supply this epoch's expansion is computed against, and lands in
+the next epoch's bonded snapshot rather than the one it just took.
+
+Addition: an LSD pair against each tokenised stock
+--------------------------------------------------
+Upstream ESD had one pool and minted the whole LP share of each expansion to
+it. LSD runs an LSD pair against several tokenised stocks alongside the one
+against the counter token, and all of them have to be worth providing to, so
+`Comptroller.mintToBonded` now splits that share across a list of pools by
+weight (`Comptroller.mintToPools`). This is the one place upstream's
+expansion path is modified rather than added to.
+
+Weights are relative rather than percentages, and the counter-token pool
+carries the largest by default. That is not a preference: the oracle reads
+its price from that pool, and if its liquidity thins out `capture()` reports
+invalid and the protocol stops regulating altogether. Its depth is the
+precondition for everything else, not one incentive among several.
+
+Whatever the pools do not take - the division remainder, and the whole share
+before any pool is listed - goes to bonders. An expansion must mint exactly
+what the Regulator decided to mint.
+
+The pools are plain ERC20 holders as far as the DAO is concerned: they read
+their reward off their own balance, so a mint is the whole of the transfer
+and nothing in the expansion path can revert on a pool's behalf. Listing one
+is a governance vote (`AddPool`), but unlike listing a reserve it cannot be
+used to take anything - a pool can only receive newly minted LSD during an
+expansion that was already decided. The worst a bad entry does is waste
+emission. `SetPoolWeight` retunes a share, and weight zero stops a pool
+earning while leaving it listed so cached indices stay valid.
+
+`TollGate` (new file) is the hook those pools share. It holds no per-pool
+state - every swap arrives with its own PoolKey - so one deployment serves
+every stock pair, where the oracle hook can only ever serve the one pool
+whose TWAP it accumulates. Seven pairs would otherwise mean seven mined
+addresses. It carries only the afterSwap and afterSwapReturnDelta bits
+(0x44).
+
+LSD is deliberately not priced against these pools. The peg is denominated
+in the counter token; a price read from an LSD/AAPL pool would move with the
+semiconductor cycle, and "LSD is at 1.00" would stop meaning anything. Only
+the counter-token pool feeds the oracle, which is why only it has the oracle
+hook.
+
+`Quiver` is unchanged apart from exposing `sqrtPriceX96()` and
+`dollarPrice()` - the latter converted in the pool rather than in the DAO
+because squaring a sqrt price overflows a uint256 and needs 512-bit math,
+which the 0.8 compiler has a library for and 0.5 does not. It was already
+general over its PoolKey, so a stock pair needs no new pool contract. The
+price is exposed raw rather than converted because the same contract runs
+against a 6-decimal stablecoin and 18-decimal stocks alike, and converting
+would mean baking one of those in.
+
+Supporting changes: `Storage.State` gains the treasury's counter token, the
+last trusted price, per-account bond balances, the per-epoch issuance
+counters, the reserve list and its oracles, the bond discount, the treasurer,
+the LP pool list with its weights and the gas oracle - all appended, so every
+slot upstream ESD defined keeps its
+position (the layout has to stay identical across Fletcher/Bowyer/Stringer and
+Greenwood, which all run against the same proxy).
+`Comptroller.balanceCheck` is `internal` rather than upstream's `private`
+so Treasury can assert the same invariant, and its solvency check is `>=`
+where upstream ESD used `==`. Under `==`, anyone could transfer a single
+wei of LSD straight to the DAO address and every balance-changing call
+would then revert on the assertion - a one-wei permanent brick. `>=` keeps
+the guarantee that matters (the DAO holds at least the LSD it owes to
+staged, bonded and redeemable) and tolerates a donated surplus, which is
+credited to no one and reads into no other number.
+`Stringer` derives the counter token by reading the LP pool's own PoolKey
+rather than taking it as another hardcoded constant, so it cannot disagree
+with the token the oracle prices against.
+
+`Greenwood` compiles to about 24,230 bytes of runtime code against
+EIP-170's 24,576-byte limit (optimizer runs=1), and the `ListReserve`
+proposal - the largest, since every proposal inherits the whole runtime -
+to 24,484, leaving roughly 90 bytes. That headroom is the real constraint
+here, and it is
+why several views that were public are now internal (`reserveValue`,
+`bondValue`, `isPool`, `bondPrice`, `bondsThisEpoch`, `advanceIncentive`,
+the removed `redeemPayouts`/`poolRewardFor`/`gasOracle`) and why
+`backingPerDollar`/`bondDiscount`/`effectiveBondPrice` return plain uint256
+rather than ABIEncoderV2 structs. Each dropped view is price times balance
+or a weighted share, so the frontend does that arithmetic itself. Measure
+before adding another public getter.
+
+The underlying bonding/rebase/coupon/governance mechanism itself
+(Bonding.sol, Market.sol, Regulator.sol, Govern.sol, Comptroller.sol,
+Curve.sol, State.sol, etc.) is unmodified from ESD's original design.
+
+All original copyright and license notices have been preserved in each
+source file as required by the Apache License, Version 2.0.

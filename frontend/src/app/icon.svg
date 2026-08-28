@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- The £sd coin, favicon-sized: bronze edge, gold face, struck arrow.
+       The rim legend and beads are dropped here - unreadable at 32px. -->
+  <defs>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#a5762a"/>
+      <stop offset="45%" stop-color="#5c3d0e"/>
+      <stop offset="100%" stop-color="#8a6120"/>
+    </linearGradient>
+    <radialGradient id="face" cx="38%" cy="30%" r="88%">
+      <stop offset="0%" stop-color="#fbe491"/>
+      <stop offset="40%" stop-color="#efc45c"/>
+      <stop offset="75%" stop-color="#cd9a32"/>
+      <stop offset="100%" stop-color="#8f5f16"/>
+    </radialGradient>
+  </defs>
+  <circle cx="100" cy="100" r="97" fill="url(#rim)"/>
+  <circle cx="100" cy="100" r="85" fill="url(#face)"/>
+  <circle cx="100" cy="100" r="85" fill="none" stroke="rgba(255,240,190,0.5)" stroke-width="2"/>
+  <circle cx="100" cy="100" r="68" fill="rgba(92,61,14,0.10)"/>
+  <circle cx="100" cy="100" r="68" fill="none" stroke="rgba(92,61,14,0.30)" stroke-width="2"/>
+  <g transform="rotate(-45 100 100) translate(100 100) scale(1.02) translate(-100 -100)">
+    <g fill="rgba(80,50,8,0.55)" transform="translate(3.5 3.5)">
+      <path d="M 160 100 L 128 85 L 137 100 L 128 115 Z"/>
+      <path d="M 50 96 H 132 V 104 H 50 Z"/>
+      <path d="M 76 96 L 63 79 L 53 79 L 66 96 Z"/>
+      <path d="M 76 104 L 63 121 L 53 121 L 66 104 Z"/>
+      <path d="M 60 96 L 47 79 L 37 79 L 50 96 Z"/>
+      <path d="M 60 104 L 47 121 L 37 121 L 50 104 Z"/>
+    </g>
+    <g fill="rgba(255,240,190,0.85)" transform="translate(-2.5 -2.5)">
+      <path d="M 160 100 L 128 85 L 137 100 L 128 115 Z"/>
+      <path d="M 50 96 H 132 V 104 H 50 Z"/>
+      <path d="M 76 96 L 63 79 L 53 79 L 66 96 Z"/>
+      <path d="M 76 104 L 63 121 L 53 121 L 66 104 Z"/>
+      <path d="M 60 96 L 47 79 L 37 79 L 50 96 Z"/>
+      <path d="M 60 104 L 47 121 L 37 121 L 50 104 Z"/>
+    </g>
+    <g fill="#c8922a" stroke="rgba(96,62,12,0.55)" stroke-width="1.5" stroke-linejoin="round">
+      <path d="M 160 100 L 128 85 L 137 100 L 128 115 Z"/>
+      <path d="M 50 96 H 132 V 104 H 50 Z"/>
+      <path d="M 76 96 L 63 79 L 53 79 L 66 96 Z"/>
+      <path d="M 76 104 L 63 121 L 53 121 L 66 104 Z"/>
+      <path d="M 60 96 L 47 79 L 37 79 L 50 96 Z"/>
+      <path d="M 60 104 L 47 121 L 37 121 L 50 104 Z"/>
+    </g>
+  </g>
+</svg>
